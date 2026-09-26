@@ -70,6 +70,7 @@ flowchart LR
 4. API responds `202 Accepted` with the order (still pending). The client polls `GET /orders/:id` or would be notified via webhook in a fuller system.
 5. The **order worker**, running as a separate process, picks up the job, calls the (simulated) payment provider, and updates the order's status. On failure it throws, which causes BullMQ to retry with exponential backoff, up to `MAX_JOB_ATTEMPTS`. After the last attempt fails, the order is marked `dead_letter` and the job payload is copied onto an explicit dead-letter queue for inspection/replay.
 6. On success, the worker invalidates the Redis cache entries for that order and enqueues a `send-confirmation` job onto a second queue, which a separate **notification worker** consumes — demonstrating a chained, multi-stage background pipeline rather than one monolithic job.
+7. Dead-lettered orders aren't a dead end: `GET /admin/dead-letter-jobs` (behind an `X-Admin-Api-Key` header) lists them, and `POST /admin/dead-letter-jobs/:jobId/replay` resets the order to `pending`, re-enqueues it onto `process-order` for a fresh set of attempts, and removes the entry from the dead-letter queue — the same recovery an on-call engineer would do by hand, exposed as an API instead.
 
 ## Why these specific design choices
 
@@ -167,8 +168,10 @@ CI runs both suites against real Postgres/Redis service containers on every push
 
 Deploy-ready configs are included for both platforms; you'll need your own account/repo to actually stand up the live instance:
 
-- **Render** — `render.yaml` is a Blueprint: push this repo to your own GitHub, then "New +" → "Blueprint" in the Render dashboard and point it at the repo. It provisions the API, both workers, a Postgres database, and a Redis instance from that one file.
-- **Railway** — `railway.json` configures the Docker build for the API service. Create the project from this repo, add a Postgres and a Redis plugin, then add two more services from the same repo with the start command overridden to `node dist/queue/orderWorker.js` and `node dist/queue/notificationWorker.js` respectively.
+- **Render** — `render.yaml` is a Blueprint: push this repo to your own GitHub, then "New +" → "Blueprint" in the Render dashboard and point it at the repo. It provisions the API, a Postgres database, and a Redis instance from that one file.
+  - **Free-tier note:** Render's free plan doesn't offer a free Background Worker service type (only Web Service, Postgres, and Key Value are free — see [docs.render.com/free](https://docs.render.com/free)). Rather than pay for two worker services just for a demo, `render.yaml` sets `RUN_WORKERS_IN_PROCESS=true`, which runs both the order worker and notification worker inside the same process as the API (see `src/server.ts`). Locally via `docker-compose.yml`, and in the commented-out paid-plan block at the bottom of `render.yaml`, they run as properly isolated separate processes — the topology you'd actually want once traffic matters.
+  - Render's free web services spin down after 15 minutes of inactivity (first request afterward takes ~1 minute to wake), and the free Postgres database expires 30 days after creation (14-day grace period, then deletion) — fine for a demo, but plan to upgrade the database to a paid tier or redeploy fresh if you need this running long-term.
+- **Railway** — `railway.json` configures the Docker build for the API service. As of 2026 Railway's free option is a one-time $5 trial credit (30 days), after which it's a $5/month Hobby plan — Render is the better choice if you specifically want an ongoing free deployment. If you do use Railway: create the project from this repo, add a Postgres and a Redis plugin, then add two more services from the same repo with the start command overridden to `node dist/queue/orderWorker.js` and `node dist/queue/notificationWorker.js` respectively (Railway's paid plans do support background workers, unlike Render's free tier).
 
 In both cases, run `npm run migrate` once against the provisioned `DATABASE_URL` (Render/Railway both let you run one-off commands against a deployed service) before the first request.
 
@@ -179,6 +182,8 @@ In both cases, run `npm run migrate` once against the provisioned `DATABASE_URL`
 | `POST` | `/orders`      | Body: `{customer_email, item, quantity, amount_cents}`. Optional `Idempotency-Key` header. Returns `202` with the pending order. |
 | `GET`  | `/orders/:id`  | Cache-aside read; `X-Cache: HIT|MISS` response header. |
 | `GET`  | `/orders`      | `?limit=20&cursor=...` keyset pagination; response includes `nextCursor`. |
+| `GET`  | `/admin/dead-letter-jobs` | Requires `X-Admin-Api-Key` header. Lists orders that exhausted all retry attempts. |
+| `POST` | `/admin/dead-letter-jobs/:jobId/replay` | Requires `X-Admin-Api-Key` header. Resets the order to `pending`, re-enqueues it for a fresh set of attempts, and removes it from the dead-letter queue. |
 | `GET`  | `/healthz`     | Liveness check. |
 
 ## What's intentionally out of scope

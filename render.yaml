@@ -1,5 +1,15 @@
 # Render "Blueprint" - connect this repo at https://dashboard.render.com/blueprints
 # and Render will provision everything below automatically.
+#
+# Note: Render's free plan does not offer a free Background Worker service
+# type (only Web Service, Postgres, and Key Value are free) - see
+# https://docs.render.com/free. Running two paid workers just for a demo
+# isn't worth it, so RUN_WORKERS_IN_PROCESS below runs both the order
+# worker and the notification worker inside the same process as the API.
+# If you upgrade order-api off the free plan, you can instead add back
+# separate `type: worker` services (see the commented block at the bottom)
+# and drop RUN_WORKERS_IN_PROCESS for a more production-shaped topology
+# matching docker-compose.yml.
 services:
   - type: web
     name: order-api
@@ -20,36 +30,10 @@ services:
           property: connectionString
       - key: PORT
         value: 3000
-
-  - type: worker
-    name: order-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerCommand: node dist/queue/orderWorker.js
-    plan: free
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: order-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: order-redis
-          type: redis
-          property: connectionString
-
-  - type: worker
-    name: notification-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerCommand: node dist/queue/notificationWorker.js
-    plan: free
-    envVars:
-      - key: REDIS_URL
-        fromService:
-          name: order-redis
-          type: redis
-          property: connectionString
+      - key: RUN_WORKERS_IN_PROCESS
+        value: 'true'
+      - key: ADMIN_API_KEY
+        generateValue: true
 
   - type: redis
     name: order-redis
@@ -59,3 +43,29 @@ services:
 databases:
   - name: order-db
     plan: free
+
+# --- Paid-plan alternative (matches docker-compose.yml's topology) ---
+# Uncomment these and remove RUN_WORKERS_IN_PROCESS above once order-api is
+# on a paid plan, so the workers run isolated from API request handling:
+#
+#   - type: worker
+#     name: order-worker
+#     runtime: docker
+#     dockerfilePath: ./Dockerfile
+#     dockerCommand: node dist/queue/orderWorker.js
+#     plan: starter
+#     envVars:
+#       - key: DATABASE_URL
+#         fromDatabase: { name: order-db, property: connectionString }
+#       - key: REDIS_URL
+#         fromService: { name: order-redis, type: redis, property: connectionString }
+#
+#   - type: worker
+#     name: notification-worker
+#     runtime: docker
+#     dockerfilePath: ./Dockerfile
+#     dockerCommand: node dist/queue/notificationWorker.js
+#     plan: starter
+#     envVars:
+#       - key: REDIS_URL
+#         fromService: { name: order-redis, type: redis, property: connectionString }
