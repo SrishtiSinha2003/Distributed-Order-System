@@ -72,11 +72,11 @@ jobs:
         run: npm run test:unit
 
       - name: Run integration tests
-        run: npm run test:integration
+        run: npm run test:integration -- --forceExit
 
-      - name: Upload coverage
+      - name: Run coverage
         if: matrix.node-version == '20.x'
-        run: npm run test:coverage
+        run: npm run test:coverage -- --forceExit
 
   docker-build:
     runs-on: ubuntu-latest
