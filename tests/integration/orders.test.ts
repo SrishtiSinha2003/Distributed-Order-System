@@ -21,15 +21,18 @@ const REDIS_URL = process.env.REDIS_URL as string;
 let pool: Pool;
 let redis: Redis;
 let orderQueue: Queue<ProcessOrderJobData>;
+let orderQueueRedis: Redis;
 let app: ReturnType<typeof createApp>;
 let servicesAvailable = true;
 
 beforeAll(async () => {
   pool = new Pool({ connectionString: DATABASE_URL });
   redis = new Redis(REDIS_URL);
-  orderQueue = new Queue<ProcessOrderJobData>('process-order-test', {
-    connection: new Redis(REDIS_URL, { maxRetriesPerRequest: null })
-  });
+  orderQueueRedis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
+
+orderQueue = new Queue<ProcessOrderJobData>('process-order-test', {
+  connection: orderQueueRedis
+});
 
   try {
     await pool.query('SELECT 1');
@@ -65,7 +68,9 @@ beforeAll(async () => {
 afterAll(async () => {
   if (servicesAvailable) {
     await pool.query('TRUNCATE TABLE orders');
+
     await orderQueue.close();
+
     await pool.end();
     await redis.quit();
   }

@@ -1,3 +1,4 @@
+import { describe, expect, it, jest } from '@jest/globals';
 import RedisMock from 'ioredis-mock';
 import { Request, Response } from 'express';
 import { createRateLimiter } from '../../src/middleware/rateLimiter';
@@ -104,8 +105,10 @@ describe('token bucket rate limiter', () => {
 
   it('fails open (lets the request through) if Redis errors', async () => {
     const brokenRedis = {
-      eval: jest.fn().mockRejectedValue(new Error('ECONNREFUSED'))
-    } as never;
+  eval: jest.fn().mockImplementation(() => {
+    return Promise.reject(new Error('ECONNREFUSED'));
+  })
+} as never;
 
     const limiter = createRateLimiter({ redis: brokenRedis, capacity: 1, refillRatePerSecond: 1 });
     const { req, res } = mockReqRes();
