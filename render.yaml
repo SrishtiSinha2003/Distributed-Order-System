@@ -5,7 +5,7 @@ services:
     name: order-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    dockerCommand: node dist/server.js
+    dockerCommand: sh -c "node scripts/migrate.js && node dist/server.js"
     plan: free
     healthCheckPath: /healthz
     envVars:
